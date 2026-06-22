@@ -1,0 +1,30 @@
+name: Job Agent
+
+on:
+  schedule:
+    - cron: '0 7 * * *'  # Jeden Tag um 8 Uhr deutsche Zeit
+  workflow_dispatch:       # Auch manuell startbar
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Code holen
+        uses: actions/checkout@v3
+
+      - name: Python einrichten
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Bibliotheken installieren
+        run: pip install -r requirements.txt
+
+      - name: Job Agent starten
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EMAIL_ABSENDER: ${{ secrets.EMAIL_ABSENDER }}
+          EMAIL_PASSWORT: ${{ secrets.EMAIL_PASSWORT }}
+          EMAIL_EMPFAENGER: ${{ secrets.EMAIL_EMPFAENGER }}
+        run: python job_agent.py
