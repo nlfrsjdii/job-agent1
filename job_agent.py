@@ -1,6 +1,6 @@
 """
 Job Agent für Niloofar
-Liest RSS-Feeds von Interamt, Epojobs, Kulturjobs, Karriereportal Berlin
+Nutzt Google News RSS um Stellenanzeigen von allen deutschen Jobportalen zu finden
 Bewertet jeden Job gegen dein Profil
 Schickt täglich eine E-Mail mit den Ergebnissen
 """
@@ -10,58 +10,71 @@ import smtplib
 import json
 import os
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from anthropic import Anthropic
 
 # ─────────────────────────────────────────────
-# KONFIGURATION — hier anpassen
+# KONFIGURATION
 # ─────────────────────────────────────────────
 
-EMAIL_ABSENDER    = os.environ.get("EMAIL_ABSENDER")     # deine Gmail-Adresse
-EMAIL_PASSWORT    = os.environ.get("EMAIL_PASSWORT")     # Gmail App-Passwort
-EMAIL_EMPFAENGER  = os.environ.get("EMAIL_EMPFAENGER")   # wohin die E-Mail geht
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")  # Anthropic API Key
-GESEHENE_DATEI    = "gesehene_jobs.json"                 # speichert bereits gesehene Stellen
+EMAIL_ABSENDER    = os.environ.get("EMAIL_ABSENDER")
+EMAIL_PASSWORT    = os.environ.get("EMAIL_PASSWORT")
+EMAIL_EMPFAENGER  = os.environ.get("EMAIL_EMPFAENGER")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+GESEHENE_DATEI    = "gesehene_jobs.json"
 
 # ─────────────────────────────────────────────
-# RSS FEEDS
+# GOOGLE NEWS RSS FEEDS
+# Sucht automatisch auf Indeed, StepStone, LinkedIn, Interamt etc.
 # ─────────────────────────────────────────────
 
 RSS_FEEDS = [
     {
-        "name": "Interamt — Koordination Berlin",
-        "url": "https://www.interamt.de/koop/app/trefferliste?stellenangebotsart=0&behoerde=&land=&ort=Berlin&berufsfeld=&suche=Koordination&umkreis=0&format=rss"
+        "name": "Projektkoordinator Berlin",
+        "url": "https://news.google.com/rss/search?q=Projektkoordinator+Berlin+Stelle&hl=de&gl=DE&ceid=DE:de"
     },
     {
-        "name": "Interamt — Projektassistenz Berlin",
-        "url": "https://www.interamt.de/koop/app/trefferliste?stellenangebotsart=0&behoerde=&land=&ort=Berlin&berufsfeld=&suche=Projektassistenz&umkreis=0&format=rss"
+        "name": "Projektassistenz Berlin",
+        "url": "https://news.google.com/rss/search?q=Projektassistenz+Berlin+Job&hl=de&gl=DE&ceid=DE:de"
     },
     {
-        "name": "Interamt — Veranstaltung Berlin",
-        "url": "https://www.interamt.de/koop/app/trefferliste?stellenangebotsart=0&behoerde=&land=&ort=Berlin&berufsfeld=&suche=Veranstaltung&umkreis=0&format=rss"
+        "name": "Office Manager Berlin",
+        "url": "https://news.google.com/rss/search?q=Office+Manager+Berlin+Stelle&hl=de&gl=DE&ceid=DE:de"
     },
     {
-        "name": "Epojobs — Koordination",
-        "url": "https://www.epojobs.eu/index.php?option=com_jobboard&view=jobs&format=feed&type=rss&searchword=koordination"
+        "name": "Koordination Kulturbereich Berlin",
+        "url": "https://news.google.com/rss/search?q=Koordination+Kultur+Berlin+Stelle&hl=de&gl=DE&ceid=DE:de"
     },
     {
-        "name": "Epojobs — Projektassistenz",
-        "url": "https://www.epojobs.eu/index.php?option=com_jobboard&view=jobs&format=feed&type=rss&searchword=projektassistenz"
+        "name": "Veranstaltungskoordination Berlin",
+        "url": "https://news.google.com/rss/search?q=Veranstaltungskoordination+Berlin+Job&hl=de&gl=DE&ceid=DE:de"
     },
     {
-        "name": "Kulturjobs — Berlin",
-        "url": "https://www.kulturjobs.de/jobs/rss/?q=koordination&location=Berlin"
+        "name": "Eventkoordinator Berlin",
+        "url": "https://news.google.com/rss/search?q=Eventkoordinator+Berlin+Stelle+Vollzeit&hl=de&gl=DE&ceid=DE:de"
     },
     {
-        "name": "Karriereportal Berlin — Koordination",
-        "url": "https://karriereportal-stellen.berlin.de/suche?facets=%7B%7D&query=koordination&format=rss"
+        "name": "Interamt Koordination Berlin",
+        "url": "https://news.google.com/rss/search?q=interamt+Koordination+Berlin&hl=de&gl=DE&ceid=DE:de"
+    },
+    {
+        "name": "GIZ Koordination Jobs",
+        "url": "https://news.google.com/rss/search?q=GIZ+Koordinator+Stelle+Berlin&hl=de&gl=DE&ceid=DE:de"
+    },
+    {
+        "name": "Goethe Institut Stelle",
+        "url": "https://news.google.com/rss/search?q=Goethe+Institut+Stelle+Koordination&hl=de&gl=DE&ceid=DE:de"
+    },
+    {
+        "name": "Festivalkoordination Berlin",
+        "url": "https://news.google.com/rss/search?q=Festival+Koordination+Berlin+Job+Vollzeit&hl=de&gl=DE&ceid=DE:de"
     },
 ]
 
 # ─────────────────────────────────────────────
-# PROFIL — wird dem AI-Agenten übergeben
+# PROFIL
 # ─────────────────────────────────────────────
 
 PROFIL = """
@@ -75,7 +88,7 @@ AKTUELL: Marketing & Operations Koordinatorin bei Kanlog (Frankfurt), MA America
 ERFAHRUNG:
 - Schichtplanung für 30+ Mitarbeiter, Partnerkoordination, monatliches Reporting
 - Office & Projektkoordinatorin bei Tadbir Petro Energy (Teheran), inkl. internationale Messeeinsätze
-- Ehrenamtliche Kulturveranstaltungskoordination (Ausstellungen, Filmbende, Panels)
+- Ehrenamtliche Kulturveranstaltungskoordination (Ausstellungen, Filmabende, Panels)
 - Tools: Google Workspace, Factorial, SharePoint, Canva, MS Office
 
 BEVORZUGTE ARBEITGEBER:
@@ -83,24 +96,27 @@ BEVORZUGTE ARBEITGEBER:
 - Internationale Organisationen (GIZ, UN Women, Bertelsmann Stiftung)
 - Öffentlicher Dienst (TVöD)
 - Eventproduktion, Festivalkoordination
-- Musik/Entertainment (echte persönliche Affinität zu Techno/elektronischer Musik)
+- Musik/Entertainment (Techno/elektronische Musik)
 
 HARD FILTERS — sofort ablehnen wenn:
-- Reine PR/Redaktion/Copywriting-Rolle (erfordert muttersprachliches Schreiben auf Deutsch)
+- Reine PR/Redaktion/Copywriting-Rolle
 - B2B Sales mit Quota
-- Sicherheitsrelevant (BND, Verfassungsschutz) — erfordert deutsche Staatsbürgerschaft
+- Sicherheitsrelevant (BND etc.)
 - Nur Frankfurt, kein Remote/Berlin
-- Senior-Level mit 5+ Jahren Erfahrung zwingend erforderlich
-- Reine NGO mit sehr niedrigem Gehalt (unter ~35k)
-- Werkstudent:in (sie arbeitet bereits Vollzeit)
+- Senior-Level mit 5+ Jahren zwingend erforderlich
+- Reine NGO unter ~35k Gehalt
+- Werkstudent:in
 
-POSITIVE SIGNALE — höheres Ranking:
+POSITIVE SIGNALE:
 - Berlin oder Remote
 - Koordination, Operations, Projektassistenz, Office Management
 - Mehrsprachigkeit erwünscht
 - Kultur, internationale Organisationen, Medien, Events
 - TVöD / öffentlicher Dienst
 - Eintrittslevel bis 3 Jahre Erfahrung
+
+WICHTIG: Nur echte Stellenanzeigen bewerten. Nachrichtenartikel, Blogposts oder 
+allgemeine Artikel über Berufe ignorieren und als ❌ Skip markieren.
 """
 
 # ─────────────────────────────────────────────
@@ -125,7 +141,8 @@ def lese_feeds():
     for feed_info in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_info["url"])
-            for entry in feed.entries[:15]:  # max 15 pro Feed
+            count = 0
+            for entry in feed.entries[:10]:
                 alle_jobs.append({
                     "quelle": feed_info["name"],
                     "titel": entry.get("title", "Kein Titel"),
@@ -133,7 +150,8 @@ def lese_feeds():
                     "beschreibung": entry.get("summary", "")[:500],
                     "datum": entry.get("published", "")
                 })
-            print(f"✅ {feed_info['name']}: {len(feed.entries)} Einträge")
+                count += 1
+            print(f"✅ {feed_info['name']}: {count} Einträge")
         except Exception as e:
             print(f"❌ Fehler bei {feed_info['name']}: {e}")
     return alle_jobs
@@ -146,7 +164,7 @@ def bewerte_jobs_mit_ai(jobs):
         prompt = f"""
 {PROFIL}
 
-Bewerte diese Stellenanzeige für die Kandidatin:
+Bewerte diesen Eintrag für die Kandidatin:
 
 TITEL: {job['titel']}
 QUELLE: {job['quelle']}
@@ -157,7 +175,7 @@ Antworte NUR mit einem JSON-Objekt, kein Text davor oder danach:
 {{
   "empfehlung": "✅ Bewerben" oder "⚠️ Vielleicht" oder "❌ Skip",
   "begruendung": "1-2 Sätze warum",
-  "prioritaet": 1 bis 3 (1=hoch, 3=niedrig)
+  "prioritaet": 1 bis 3
 }}
 """
         try:
@@ -167,7 +185,6 @@ Antworte NUR mit einem JSON-Objekt, kein Text davor oder danach:
                 messages=[{"role": "user", "content": prompt}]
             )
             text = response.content[0].text.strip()
-            # JSON aus Antwort extrahieren
             start = text.find("{")
             end = text.rfind("}") + 1
             bewertung = json.loads(text[start:end])
@@ -178,7 +195,6 @@ Antworte NUR mit einem JSON-Objekt, kein Text davor oder danach:
             job.update({"empfehlung": "⚠️ Vielleicht", "begruendung": "Konnte nicht bewertet werden.", "prioritaet": 2})
             bewertete.append(job)
 
-    # Sortieren: zuerst ✅, dann ⚠️, dann ❌, innerhalb nach Priorität
     reihenfolge = {"✅ Bewerben": 0, "⚠️ Vielleicht": 1, "❌ Skip": 2}
     bewertete.sort(key=lambda j: (reihenfolge.get(j.get("empfehlung", "⚠️"), 1), j.get("prioritaet", 2)))
     return bewertete
@@ -206,7 +222,7 @@ def erstelle_email_html(jobs):
         <h2 style="border-bottom: 2px solid #1a73e8; padding-bottom: 8px;">
             🔍 Job-Agent — {heute}
         </h2>
-        <p>{len(jobs)} neue Stellen gefunden · {len(bewerben)} zum Bewerben · {len(vielleicht)} vielleicht</p>
+        <p>{len(jobs)} Einträge analysiert · {len(bewerben)} zum Bewerben · {len(vielleicht)} vielleicht</p>
 
         <h3 style="color: #34a853;">✅ Direkt bewerben ({len(bewerben)})</h3>
         {bewerben_html}
@@ -221,7 +237,7 @@ def erstelle_email_html(jobs):
 
 def sende_email(html_inhalt, anzahl_jobs):
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"🔍 Job-Agent: {anzahl_jobs} neue Stellen — {datetime.now().strftime('%d.%m.%Y')}"
+    msg["Subject"] = f"🔍 Job-Agent: {anzahl_jobs} relevante Stellen — {datetime.now().strftime('%d.%m.%Y')}"
     msg["From"] = EMAIL_ABSENDER
     msg["To"] = EMAIL_EMPFAENGER
     msg.attach(MIMEText(html_inhalt, "html"))
@@ -238,37 +254,29 @@ def sende_email(html_inhalt, anzahl_jobs):
 def main():
     print(f"\n🤖 Job-Agent startet — {datetime.now().strftime('%d.%m.%Y %H:%M')}\n")
 
-    # 1. Bereits gesehene Jobs laden
     gesehen = lade_gesehene_jobs()
-
-    # 2. Feeds lesen
     alle_jobs = lese_feeds()
-    print(f"\n📋 Gesamt gefunden: {len(alle_jobs)} Jobs")
+    print(f"\n📋 Gesamt gefunden: {len(alle_jobs)} Einträge")
 
-    # 3. Nur neue Jobs filtern
     neue_jobs = [j for j in alle_jobs if job_id(j) not in gesehen]
-    print(f"🆕 Davon neu: {len(neue_jobs)} Jobs\n")
+    print(f"🆕 Davon neu: {len(neue_jobs)} Einträge\n")
 
     if not neue_jobs:
-        print("Keine neuen Jobs heute. Fertig.")
+        print("Keine neuen Einträge heute. Fertig.")
         return
 
-    # 4. Mit AI bewerten
-    print("🧠 Bewerte Jobs mit AI...\n")
+    print("🧠 Bewerte mit AI...\n")
     bewertete_jobs = bewerte_jobs_mit_ai(neue_jobs)
 
-    # 5. Nur relevante Jobs in E-Mail (kein ❌)
     relevante_jobs = [j for j in bewertete_jobs if j.get("empfehlung") != "❌ Skip"]
-    print(f"\n📬 Relevante Jobs für E-Mail: {len(relevante_jobs)}")
+    print(f"\n📬 Relevante Stellen: {len(relevante_jobs)}")
 
-    # 6. E-Mail senden
     if relevante_jobs:
         html = erstelle_email_html(relevante_jobs)
         sende_email(html, len(relevante_jobs))
     else:
-        print("Keine relevanten Jobs heute — keine E-Mail.")
+        print("Keine relevanten Stellen heute — keine E-Mail.")
 
-    # 7. Gesehene Jobs speichern
     for job in neue_jobs:
         gesehen.add(job_id(job))
     speichere_gesehene_jobs(gesehen)
